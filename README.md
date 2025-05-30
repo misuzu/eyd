@@ -15,6 +15,7 @@ I'm not responsible for any data loss, use at your own risk.
 
 - Doesn't touch anything besides the root filesystem
 - A 700KB binary in initrd
+- Only systemd initrd is supported
 
 ## Set it up
 
