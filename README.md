@@ -11,9 +11,10 @@ I'm not responsible for any data loss, use at your own risk.
 - Moves everything from root filesystem not in `boot.initrd.eyd.keep` to the `/oldroot` directory
 - Retains data from previous boots (5 by default), so you have a chance to recover your data
 
-## Limitations
+## Drawbacks
 
 - Doesn't touch anything besides the root filesystem
+- A 700KB binary in initrd
 
 ## Set it up
 
