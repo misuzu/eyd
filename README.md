@@ -4,13 +4,27 @@
 
 I'm not responsible for any data loss, use at your own risk.
 
-### Set up
+## Features
+
+- Easy to set up, just enable it and set paths to keep
+- No snapshots, tmpfs as root or bind mounts are required, works with any filesystem
+- Moves everything from root filesystem not in `boot.initrd.eyd.keep` to the `/oldroot` directory
+- Retains data from previous boots (5 by default), so you have a chance to recover your data
+
+## Limitations
+
+- Doesn't touch anything besides the root filesystem
+
+## Set it up
 
 ```nix
+# in your flake
 inputs.eyd.url = "github:misuzu/eyd";
 
+# import the eyd module
 imports = [ inputs.eyd.nixosModules.default ];
 
+# the actual configuration
 boot.initrd.systemd.enable = true;
 boot.initrd.eyd.enable = true;
 boot.initrd.eyd.keep = [
@@ -41,4 +55,15 @@ boot.initrd.eyd.keep = [
   "/var/log/lastlog"
   "/var/log/wtmp"
 ];
+boot.initrd.eyd.retain = 3;
 ```
+
+## Debugging
+
+Run `journalctl -b 0 -u eyd` to see the logs
+
+
+## Related projects
+
+- [`impermanence`](https://github.com/nix-community/impermanence)
+- [`preservation`](https://github.com/nix-community/preservation)

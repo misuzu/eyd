@@ -5,11 +5,7 @@
   ...
 }:
 let
-  pythonEnv = pkgs.python3.withPackages (ps: with ps;  [ psutil ]);
-  eyd = pkgs.writeScriptBin "eyd" ''
-    #!${lib.getExe pythonEnv}
-    ${builtins.readFile ./eyd.py}
-  '';
+  eyd = pkgs.pkgsStatic.callPackage ./eyd/package.nix { };
   cfg = config.boot.initrd.eyd;
 in
 {
@@ -41,11 +37,15 @@ in
         "/etc/subgid"
         "/etc/subuid"
         "/nix"
-        "/run"
         "/var/empty"
         "/var/lib/nixos"
       ];
       description = "Paths kept by default, do not touch if not sure.";
+    };
+    retain = lib.mkOption {
+      type = lib.types.ints.unsigned;
+      default = 5;
+      description = "How many previous roots to retain, zero to retain all.";
     };
   };
   config = lib.mkIf cfg.enable {
@@ -55,12 +55,7 @@ in
         message = "`boot.initrd.systemd.enable = true;` is required.";
       }
     ];
-    boot.initrd.systemd.storePaths = [
-      eyd
-      pythonEnv
-      pkgs.python3
-      pkgs.python3Packages.psutil
-    ];
+    boot.initrd.systemd.storePaths = [ eyd ];
     boot.initrd.systemd.services.eyd = {
       after = [ "sysroot.mount" ];
       before = [ "initrd-switch-root.target" ];
@@ -71,6 +66,8 @@ in
         ExecStart = "${lib.getExe eyd} ${
           lib.escapeShellArgs [
             "/sysroot"
+            "/oldroot"
+            (toString cfg.retain)
             (builtins.toJSON (cfg.defaultKeep ++ cfg.keep))
           ]
         }";
