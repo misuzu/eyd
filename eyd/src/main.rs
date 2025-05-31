@@ -1,7 +1,8 @@
 use std::collections::BTreeSet;
-use std::collections::HashSet;
 use std::env;
 use std::fs;
+use std::os::unix::fs::DirBuilderExt;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
@@ -15,7 +16,7 @@ enum WalkAction {
     Yield,
 }
 
-fn walk_action(entry: &Path, keep: &HashSet<PathBuf>) -> WalkAction {
+fn walk_action(entry: &Path, keep: &BTreeSet<PathBuf>) -> WalkAction {
     for path in keep {
         if path == entry {
             return WalkAction::Skip;
@@ -27,7 +28,7 @@ fn walk_action(entry: &Path, keep: &HashSet<PathBuf>) -> WalkAction {
     WalkAction::Yield
 }
 
-fn walk(root: &Path, keep: &HashSet<PathBuf>) -> Vec<PathBuf> {
+fn walk(root: &Path, keep: &BTreeSet<PathBuf>) -> Vec<PathBuf> {
     let mut result = Vec::new();
     if let Ok(entries) = fs::read_dir(root) {
         for entry in entries.flatten() {
@@ -48,14 +49,14 @@ fn walk(root: &Path, keep: &HashSet<PathBuf>) -> Vec<PathBuf> {
     result
 }
 
-fn swith_root(root: &Path, items: &HashSet<PathBuf>) -> HashSet<PathBuf> {
+fn swith_root(root: &Path, items: &BTreeSet<PathBuf>) -> BTreeSet<PathBuf> {
     items
         .iter()
         .map(|entry| root.join(entry.strip_prefix("/").unwrap_or(entry)))
         .collect()
 }
 
-fn normalize_keep(items: &HashSet<PathBuf>) -> HashSet<PathBuf> {
+fn normalize_keep(items: &BTreeSet<PathBuf>) -> BTreeSet<PathBuf> {
     items
         .iter()
         .filter(|item1| {
@@ -67,7 +68,45 @@ fn normalize_keep(items: &HashSet<PathBuf>) -> HashSet<PathBuf> {
         .collect()
 }
 
-fn move_dirty(root: &Path, target: &Path, keep: &HashSet<PathBuf>) {
+fn root_path_to_target_path(root: &Path, target: &Path, path: &Path) -> PathBuf {
+    target.join(path.strip_prefix(root).unwrap_or(&path))
+}
+
+fn target_path_to_root_path(root: &Path, target: &Path, path: &Path) -> Option<PathBuf> {
+    path.strip_prefix(target).ok().map(|path| root.join(path))
+}
+
+fn create_target_parents(root: &Path, target: &Path, path: &Path) {
+    for target_parent in root_path_to_target_path(root, target, path)
+        .parent()
+        .unwrap()
+        .ancestors()
+        .collect::<Vec<_>>()
+        .iter()
+        .rev()
+    {
+        if !target_parent.exists() {
+            let parent =
+                target_path_to_root_path(root, target, target_parent).unwrap_or(root.into());
+            let parent_mode = parent
+                .metadata()
+                .ok()
+                .map(|x| x.permissions().mode())
+                .unwrap_or(0o700);
+            println!(
+                "creating directory {} with mode {:#o}",
+                target_parent.display(),
+                parent_mode
+            );
+            fs::DirBuilder::new()
+                .mode(parent_mode)
+                .create(target_parent)
+                .unwrap();
+        }
+    }
+}
+
+fn move_dirty(root: &Path, target: &Path, keep: &BTreeSet<PathBuf>) {
     let target_path = root.join(target.strip_prefix("/").unwrap_or(target));
 
     if target_path.is_dir() {
@@ -75,14 +114,9 @@ fn move_dirty(root: &Path, target: &Path, keep: &HashSet<PathBuf>) {
     }
 
     for path in walk(root, keep) {
-        let to = target_path.join(path.strip_prefix(root).unwrap_or(&path));
+        create_target_parents(root, &target_path, &path);
 
-        if let Some(parent) = to.parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent).unwrap();
-            }
-        }
-
+        let to = root_path_to_target_path(root, &target_path, &path);
         if let Err(e) = fs::rename(&path, &to) {
             println!(
                 "moving {} -> {} error! {:?}",
@@ -130,12 +164,12 @@ fn main() {
     let retain = args[3].parse::<usize>().unwrap();
     let target_with_timestamp = target.join(Utc::now().format("%Y-%m-%dT%H-%M-%S").to_string());
 
-    let mut keep: HashSet<PathBuf> = serde_json::from_str(&args[4]).unwrap();
+    let mut keep: BTreeSet<PathBuf> = serde_json::from_str(&args[4]).unwrap();
     keep.insert(target.into());
 
     let mut keep = swith_root(root, &keep);
 
-    let mountpoints: HashSet<PathBuf> = mountpaths()
+    let mountpoints: BTreeSet<PathBuf> = mountpaths()
         .unwrap()
         .iter()
         .filter(|x| *x != root && x.starts_with(root))
@@ -160,7 +194,7 @@ mod tests {
         assert_eq!(
             walk_action(
                 Path::new("/var/log"),
-                &HashSet::from([Path::new("/var/log").into()]),
+                &BTreeSet::from([Path::new("/var/log").into()]),
             ),
             WalkAction::Skip
         );
@@ -168,7 +202,7 @@ mod tests {
         assert_eq!(
             walk_action(
                 Path::new("/var/log"),
-                &HashSet::from([Path::new("/var/log/journal").into()]),
+                &BTreeSet::from([Path::new("/var/log/journal").into()]),
             ),
             WalkAction::Recurse
         );
@@ -176,7 +210,7 @@ mod tests {
         assert_eq!(
             walk_action(
                 Path::new("/var/log"),
-                &HashSet::from([Path::new("/var/logaa").into()]),
+                &BTreeSet::from([Path::new("/var/logaa").into()]),
             ),
             WalkAction::Yield
         );
@@ -184,7 +218,7 @@ mod tests {
         assert_eq!(
             walk_action(
                 Path::new("/var/logaa"),
-                &HashSet::from([Path::new("/var/log").into()]),
+                &BTreeSet::from([Path::new("/var/log").into()]),
             ),
             WalkAction::Yield
         );
@@ -195,17 +229,17 @@ mod tests {
         assert_eq!(
             swith_root(
                 Path::new("/"),
-                &HashSet::from([Path::new("/var/log").into(), Path::new("/var").into()])
+                &BTreeSet::from([Path::new("/var/log").into(), Path::new("/var").into()])
             ),
-            HashSet::from([Path::new("/var/log").into(), Path::new("/var").into()])
+            BTreeSet::from([Path::new("/var/log").into(), Path::new("/var").into()])
         );
 
         assert_eq!(
             swith_root(
                 Path::new("/sysroot"),
-                &HashSet::from([Path::new("/var/log").into(), Path::new("/var").into()])
+                &BTreeSet::from([Path::new("/var/log").into(), Path::new("/var").into()])
             ),
-            HashSet::from([
+            BTreeSet::from([
                 Path::new("/sysroot/var/log").into(),
                 Path::new("/sysroot/var").into()
             ])
@@ -215,19 +249,124 @@ mod tests {
     #[test]
     fn test_normalize_keep() {
         assert_eq!(
-            normalize_keep(&HashSet::from([
+            normalize_keep(&BTreeSet::from([
                 Path::new("/var/log").into(),
                 Path::new("/var").into()
             ])),
-            HashSet::from([Path::new("/var").into(),])
+            BTreeSet::from([Path::new("/var").into()])
         );
 
         assert_eq!(
-            normalize_keep(&HashSet::from([
+            normalize_keep(&BTreeSet::from([
                 Path::new("/var/log").into(),
                 Path::new("/var/loga").into()
             ])),
-            HashSet::from([Path::new("/var/log").into(), Path::new("/var/loga").into()])
+            BTreeSet::from([Path::new("/var/log").into(), Path::new("/var/loga").into()])
+        );
+    }
+
+    #[test]
+    fn test_create_target_parents() {
+        use std::vec::Vec;
+
+        let root_1 = Path::new("/");
+        let target_1 = Path::new("/oldroot/2025-05-31T16-05-25");
+        let path_1 = Path::new("/var/lib/nixos");
+        let target_path_1 = Path::new("/oldroot/2025-05-31T16-05-25/var/lib/nixos");
+
+        assert_eq!(
+            root_path_to_target_path(root_1, target_1, path_1),
+            target_path_1,
+        );
+
+        assert_eq!(
+            target_path_to_root_path(root_1, target_1, target_path_1),
+            Some(path_1.into()),
+        );
+
+        let ancestors_1 = target_path_1
+            .parent()
+            .unwrap()
+            .ancestors()
+            .collect::<Vec<_>>()
+            .iter()
+            .rev()
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ancestors_1,
+            vec![
+                Path::new("/"),
+                Path::new("/oldroot"),
+                Path::new("/oldroot/2025-05-31T16-05-25"),
+                Path::new("/oldroot/2025-05-31T16-05-25/var"),
+                Path::new("/oldroot/2025-05-31T16-05-25/var/lib"),
+            ],
+        );
+
+        assert_eq!(
+            ancestors_1
+                .iter()
+                .map(|parent| target_path_to_root_path(root_1, target_1, parent))
+                .collect::<Vec<_>>(),
+            vec![
+                None,
+                None,
+                Some(Path::new("/").into()),
+                Some(Path::new("/var").into()),
+                Some(Path::new("/var/lib").into()),
+            ],
+        );
+
+        let root_2 = Path::new("/sysroot/");
+        let target_2 = Path::new("/sysroot/oldroot/2025-05-31T16-05-25");
+        let path_2 = Path::new("/sysroot/var/lib/nixos");
+        let target_path_2 = Path::new("/sysroot/oldroot/2025-05-31T16-05-25/var/lib/nixos");
+
+        assert_eq!(
+            root_path_to_target_path(root_2, target_2, path_2),
+            target_path_2,
+        );
+
+        assert_eq!(
+            target_path_to_root_path(root_2, target_2, target_path_2),
+            Some(path_2.into()),
+        );
+
+        let ancestors_2 = target_path_2
+            .parent()
+            .unwrap()
+            .ancestors()
+            .collect::<Vec<_>>()
+            .iter()
+            .rev()
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ancestors_2,
+            vec![
+                Path::new("/"),
+                Path::new("/sysroot"),
+                Path::new("/sysroot/oldroot"),
+                Path::new("/sysroot/oldroot/2025-05-31T16-05-25"),
+                Path::new("/sysroot/oldroot/2025-05-31T16-05-25/var"),
+                Path::new("/sysroot/oldroot/2025-05-31T16-05-25/var/lib"),
+            ],
+        );
+
+        assert_eq!(
+            ancestors_2
+                .iter()
+                .map(|parent| target_path_to_root_path(root_2, target_2, parent))
+                .collect::<Vec<_>>(),
+            vec![
+                None,
+                None,
+                None,
+                Some(Path::new("/sysroot").into()),
+                Some(Path::new("/sysroot/var").into()),
+                Some(Path::new("/sysroot/var/lib").into()),
+            ],
         );
     }
 

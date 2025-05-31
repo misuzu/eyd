@@ -37,6 +37,7 @@ in
         "/etc/subgid"
         "/etc/subuid"
         "/nix"
+        "/run"
         "/var/empty"
         "/var/lib/nixos"
       ];
@@ -58,11 +59,11 @@ in
     boot.initrd.systemd.storePaths = [ eyd ];
     boot.initrd.systemd.services.eyd = {
       after = [ "sysroot.mount" ];
-      before = [ "initrd-switch-root.target" ];
+      before = [ "initrd-fs.target" ];
+      requiredBy = [ "initrd-fs.target" ];
       wantedBy = [ "initrd.target" ];
       description = "Erase your darlings";
       serviceConfig = {
-        Type = "oneshot";
         ExecStart = "${lib.getExe eyd} ${
           lib.escapeShellArgs [
             "/sysroot"
@@ -71,6 +72,9 @@ in
             (builtins.toJSON (cfg.defaultKeep ++ cfg.keep))
           ]
         }";
+        RemainAfterExit = true;
+        TimeoutSec = "infinity";
+        Type = "oneshot";
       };
       unitConfig.DefaultDependencies = "no";
     };
