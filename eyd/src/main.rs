@@ -1,8 +1,7 @@
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
-use std::os::unix::fs::DirBuilderExt;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
@@ -110,7 +109,11 @@ fn move_dirty(root: &Path, target: &Path, keep: &BTreeSet<PathBuf>) {
     let target_path = root.join(target.strip_prefix("/").unwrap_or(target));
 
     if target_path.is_dir() {
-        fs::remove_dir_all(&target_path).unwrap();
+        println!(
+            "target path {} already exists, not moving anything",
+            target_path.display()
+        );
+        return;
     }
 
     for path in walk(root, keep) {
