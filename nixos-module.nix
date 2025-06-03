@@ -5,7 +5,7 @@
   ...
 }:
 let
-  eyd = pkgs.pkgsStatic.callPackage ./eyd/package.nix { };
+  eyd = pkgs.callPackage ./eyd/package.nix { };
   cfg = config.boot.initrd.eyd;
 in
 {
