@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use mountpoints::mountpaths;
-use serde_json;
 
 #[derive(Debug, PartialEq)]
 enum WalkAction {
@@ -68,7 +67,7 @@ fn normalize_keep(items: &BTreeSet<PathBuf>) -> BTreeSet<PathBuf> {
 }
 
 fn root_path_to_target_path(root: &Path, target: &Path, path: &Path) -> PathBuf {
-    target.join(path.strip_prefix(root).unwrap_or(&path))
+    target.join(path.strip_prefix(root).unwrap_or(path))
 }
 
 fn target_path_to_root_path(root: &Path, target: &Path, path: &Path) -> Option<PathBuf> {
@@ -145,7 +144,7 @@ fn cleanup_old(root: &Path, target: &Path, retain: usize) {
             if paths.len() > retain {
                 for path in paths.iter().take(paths.len() - retain) {
                     println!("removing {}", path.display());
-                    fs::remove_dir_all(&path).unwrap();
+                    fs::remove_dir_all(path).unwrap();
                 }
                 return;
             }
@@ -395,7 +394,7 @@ mod tests {
             target_1.join(
                 Path::new("/home")
                     .strip_prefix(root_1)
-                    .unwrap_or(&Path::new("/home"))
+                    .unwrap_or(Path::new("/home"))
             ),
             Path::new("/oldroot/home")
         );
@@ -404,7 +403,7 @@ mod tests {
             target_2.join(
                 Path::new("/sysroot/home")
                     .strip_prefix(root_2)
-                    .unwrap_or(&Path::new("/sysroot/home"))
+                    .unwrap_or(Path::new("/sysroot/home"))
             ),
             Path::new("/sysroot/oldroot/home")
         );
