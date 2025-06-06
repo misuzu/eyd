@@ -47,18 +47,29 @@ fn walk(root: &Path, keep: &BTreeSet<PathBuf>) -> Vec<PathBuf> {
     result
 }
 
-fn swith_root(root: &Path, items: &BTreeSet<PathBuf>) -> BTreeSet<PathBuf> {
-    items
+fn normalize_keep(
+    root: &Path,
+    target: &Path,
+    mountpoints: Vec<PathBuf>,
+    mut keep: BTreeSet<PathBuf>,
+) -> BTreeSet<PathBuf> {
+    keep.insert(target.into());
+
+    let mut keep = keep
         .iter()
         .map(|entry| root.join(entry.strip_prefix("/").unwrap_or(entry)))
-        .collect()
-}
+        .collect::<BTreeSet<_>>();
 
-fn normalize_keep(items: &BTreeSet<PathBuf>) -> BTreeSet<PathBuf> {
-    items
-        .iter()
+    keep.extend(
+        mountpoints
+            .iter()
+            .filter(|x| *x != root && x.starts_with(root))
+            .cloned(),
+    );
+
+    keep.iter()
         .filter(|item1| {
-            !items
+            !keep
                 .iter()
                 .any(|item2| *item1 != item2 && item1.starts_with(item2))
         })
@@ -166,21 +177,12 @@ fn main() {
     let retain = args[3].parse::<usize>().unwrap();
     let target_with_timestamp = target.join(Utc::now().format("%Y-%m-%dT%H-%M-%S").to_string());
 
-    let mut keep: BTreeSet<PathBuf> = serde_json::from_str(&args[4]).unwrap();
-    keep.insert(target.into());
-
-    let mut keep = swith_root(root, &keep);
-
-    let mountpoints: BTreeSet<PathBuf> = mountpaths()
-        .unwrap()
-        .iter()
-        .filter(|x| *x != root && x.starts_with(root))
-        .cloned()
-        .collect();
-
-    keep.extend(mountpoints);
-
-    let keep = normalize_keep(&keep);
+    let keep = normalize_keep(
+        root,
+        target,
+        mountpaths().unwrap(),
+        serde_json::from_str(&args[4]).unwrap(),
+    );
 
     move_dirty(root, &target_with_timestamp, &keep);
 
@@ -227,50 +229,47 @@ mod tests {
     }
 
     #[test]
-    fn test_swith_root() {
+    fn test_normalize_keep() {
         assert_eq!(
-            swith_root(
-                Path::new("/"),
-                &BTreeSet::from([Path::new("/var/log").into(), Path::new("/var").into()])
+            normalize_keep(
+                &Path::new("/"),
+                &Path::new("/oldroot"),
+                vec!["/".into(), "/run".into()],
+                BTreeSet::from([Path::new("/var/log").into(), Path::new("/var").into()])
             ),
-            BTreeSet::from([Path::new("/var/log").into(), Path::new("/var").into()])
+            BTreeSet::from([
+                Path::new("/oldroot").into(),
+                Path::new("/run").into(),
+                Path::new("/var").into()
+            ])
         );
 
         assert_eq!(
-            swith_root(
-                Path::new("/sysroot"),
-                &BTreeSet::from([Path::new("/var/log").into(), Path::new("/var").into()])
+            normalize_keep(
+                &Path::new("/sysroot"),
+                &Path::new("/oldroot"),
+                vec![
+                    "/".into(),
+                    "/run".into(),
+                    "/sysroot".into(),
+                    "/sysroot/run".into()
+                ],
+                BTreeSet::from([
+                    Path::new("/var").into(),
+                    Path::new("/var/log").into(),
+                    Path::new("/var/loga").into()
+                ])
             ),
             BTreeSet::from([
-                Path::new("/sysroot/var/log").into(),
+                Path::new("/sysroot/oldroot").into(),
+                Path::new("/sysroot/run").into(),
                 Path::new("/sysroot/var").into()
             ])
         );
     }
 
     #[test]
-    fn test_normalize_keep() {
-        assert_eq!(
-            normalize_keep(&BTreeSet::from([
-                Path::new("/var/log").into(),
-                Path::new("/var").into()
-            ])),
-            BTreeSet::from([Path::new("/var").into()])
-        );
-
-        assert_eq!(
-            normalize_keep(&BTreeSet::from([
-                Path::new("/var/log").into(),
-                Path::new("/var/loga").into()
-            ])),
-            BTreeSet::from([Path::new("/var/log").into(), Path::new("/var/loga").into()])
-        );
-    }
-
-    #[test]
     fn test_create_target_parents() {
-        use std::vec::Vec;
-
         let root_1 = Path::new("/");
         let target_1 = Path::new("/oldroot/2025-05-31T16-05-25");
         let path_1 = Path::new("/var/lib/nixos");
@@ -406,6 +405,157 @@ mod tests {
                     .unwrap_or(Path::new("/sysroot/home"))
             ),
             Path::new("/sysroot/oldroot/home")
+        );
+    }
+
+    #[test]
+    fn test_eyd() {
+        use tempdir::TempDir;
+
+        let tmpdir = TempDir::new("eyd-test").unwrap();
+        let root = tmpdir.path();
+        let target = Path::new("/oldroot");
+        let mountpoints = vec![root.into(), root.join("run"), root.join("home")];
+        let keep = normalize_keep(
+            root,
+            target,
+            mountpoints,
+            BTreeSet::from([
+                Path::new("/etc/ssh/ssh_host_ed25519_key").into(),
+                Path::new("/etc/ssh/ssh_host_ed25519_key.pub").into(),
+                Path::new("/var/log").into(),
+            ]),
+        );
+
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .recursive(true)
+            .create(root.join("etc/ssh"))
+            .unwrap();
+        fs::File::create(root.join("etc/ssh/config")).unwrap();
+        fs::File::create(root.join("etc/ssh/ssh_host_ed25519_key")).unwrap();
+
+        let target_1 = target.join("2025-05-31T16-00-00");
+        let target_path_1 = root.join(target_1.strip_prefix("/").unwrap_or(&target_1));
+        assert_eq!(target_path_1.exists(), false);
+
+        move_dirty(root, &target_1, &keep);
+
+        cleanup_old(root, target, 2);
+
+        assert_eq!(target_path_1.exists(), true);
+        assert_eq!(root.join("etc/ssh").exists(), true);
+        assert_eq!(target_path_1.join("etc/ssh").exists(), true);
+
+        assert_eq!(
+            target_path_1
+                .metadata()
+                .ok()
+                .map(|x| x.permissions().mode())
+                .unwrap(),
+            0o40755
+        );
+        assert_eq!(
+            target_path_1
+                .join("etc")
+                .metadata()
+                .ok()
+                .map(|x| x.permissions().mode())
+                .unwrap(),
+            0o40700
+        );
+        assert_eq!(
+            target_path_1
+                .join("etc/ssh")
+                .metadata()
+                .ok()
+                .map(|x| x.permissions().mode())
+                .unwrap(),
+            0o40700
+        );
+
+        assert_eq!(root.join("etc/ssh/config").exists(), false);
+        assert_eq!(target_path_1.join("etc/ssh/config").exists(), true);
+
+        assert_eq!(root.join("etc/ssh/ssh_host_ed25519_key").exists(), true);
+        assert_eq!(
+            target_path_1.join("etc/ssh/ssh_host_ed25519_key").exists(),
+            false
+        );
+
+        assert_eq!(
+            fs::read_dir(root.join(target.strip_prefix("/").unwrap_or(&target)))
+                .unwrap()
+                .count(),
+            1,
+        );
+
+        fs::DirBuilder::new()
+            .recursive(true)
+            .create(root.join("var/lib/acme"))
+            .unwrap();
+        fs::DirBuilder::new()
+            .recursive(true)
+            .create(root.join("var/log"))
+            .unwrap();
+        fs::File::create(root.join("var/lib/cert")).unwrap();
+        fs::File::create(root.join("var/log/somelog")).unwrap();
+
+        let target_2 = target.join("2025-05-31T16-01-00");
+        let target_path_2 = root.join(target_2.strip_prefix("/").unwrap_or(&target_2));
+        assert_eq!(target_path_2.exists(), false);
+
+        move_dirty(root, &target_2, &keep);
+
+        cleanup_old(root, target, 2);
+
+        assert_eq!(target_path_1.exists(), true);
+        assert_eq!(target_path_2.exists(), true);
+
+        assert_eq!(root.join("var").exists(), true);
+        assert_eq!(target_path_2.join("var").exists(), true);
+
+        assert_eq!(root.join("var/lib").exists(), false);
+        assert_eq!(target_path_2.join("var/lib").exists(), true);
+
+        assert_eq!(root.join("var/log").exists(), true);
+        assert_eq!(target_path_2.join("var/log").exists(), false);
+
+        assert_eq!(
+            fs::read_dir(root.join(target.strip_prefix("/").unwrap_or(&target)))
+                .unwrap()
+                .count(),
+            2,
+        );
+
+        fs::DirBuilder::new()
+            .recursive(true)
+            .create(root.join("var/lib/acme"))
+            .unwrap();
+        fs::DirBuilder::new()
+            .recursive(true)
+            .create(root.join("var/log"))
+            .unwrap();
+        fs::File::create(root.join("var/lib/cert")).unwrap();
+        fs::File::create(root.join("var/log/somelog")).unwrap();
+
+        let target_3 = target.join("2025-05-31T16-02-00");
+        let target_path_3 = root.join(target_3.strip_prefix("/").unwrap_or(&target_3));
+        assert_eq!(target_path_3.exists(), false);
+
+        move_dirty(root, &target_3, &keep);
+
+        cleanup_old(root, target, 2);
+
+        assert_eq!(target_path_1.exists(), false);
+        assert_eq!(target_path_2.exists(), true);
+        assert_eq!(target_path_3.exists(), true);
+
+        assert_eq!(
+            fs::read_dir(root.join(target.strip_prefix("/").unwrap_or(&target)))
+                .unwrap()
+                .count(),
+            2,
         );
     }
 }
