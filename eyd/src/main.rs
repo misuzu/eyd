@@ -4,7 +4,6 @@ use std::fs;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
-use chrono::Utc;
 use mountpoints::mountpaths;
 
 #[derive(Debug, PartialEq)]
@@ -115,16 +114,28 @@ fn create_target_parents(root: &Path, target: &Path, path: &Path) {
     }
 }
 
+fn find_target_path_number(target_path: &Path) -> usize {
+    let number = if let Ok(entries) = fs::read_dir(target_path) {
+        let paths = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .collect::<BTreeSet<_>>();
+
+        paths
+            .last()
+            .and_then(|x| x.file_name())
+            .and_then(|x| x.to_str())
+            .and_then(|x| x.parse::<usize>().ok())
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    number + 1
+}
+
 fn move_dirty(root: &Path, target: &Path, keep: &BTreeSet<PathBuf>) {
     let target_path = root.join(target.strip_prefix("/").unwrap_or(target));
-
-    if target_path.is_dir() {
-        println!(
-            "target path {} already exists, not moving anything",
-            target_path.display()
-        );
-        return;
-    }
+    let target_path = target_path.join(format!("{:016}", find_target_path_number(&target_path)));
 
     for path in walk(root, keep) {
         create_target_parents(root, &target_path, &path);
@@ -175,7 +186,6 @@ fn main() {
     let root = Path::new(&args[1]);
     let target = Path::new(&args[2]);
     let retain = args[3].parse::<usize>().unwrap();
-    let target_with_timestamp = target.join(Utc::now().format("%Y-%m-%dT%H-%M-%S").to_string());
 
     let keep = normalize_keep(
         root,
@@ -184,13 +194,15 @@ fn main() {
         serde_json::from_str(&args[4]).unwrap(),
     );
 
-    move_dirty(root, &target_with_timestamp, &keep);
+    move_dirty(root, target, &keep);
 
     cleanup_old(root, target, retain);
 }
 
 #[cfg(test)]
 mod tests {
+    use tempdir::TempDir;
+
     use super::*;
 
     #[test]
@@ -271,9 +283,9 @@ mod tests {
     #[test]
     fn test_create_target_parents() {
         let root_1 = Path::new("/");
-        let target_1 = Path::new("/oldroot/2025-05-31T16-05-25");
+        let target_1 = Path::new("/oldroot/0000000000000001");
         let path_1 = Path::new("/var/lib/nixos");
-        let target_path_1 = Path::new("/oldroot/2025-05-31T16-05-25/var/lib/nixos");
+        let target_path_1 = Path::new("/oldroot/0000000000000001/var/lib/nixos");
 
         assert_eq!(
             root_path_to_target_path(root_1, target_1, path_1),
@@ -299,9 +311,9 @@ mod tests {
             vec![
                 Path::new("/"),
                 Path::new("/oldroot"),
-                Path::new("/oldroot/2025-05-31T16-05-25"),
-                Path::new("/oldroot/2025-05-31T16-05-25/var"),
-                Path::new("/oldroot/2025-05-31T16-05-25/var/lib"),
+                Path::new("/oldroot/0000000000000001"),
+                Path::new("/oldroot/0000000000000001/var"),
+                Path::new("/oldroot/0000000000000001/var/lib"),
             ],
         );
 
@@ -320,9 +332,9 @@ mod tests {
         );
 
         let root_2 = Path::new("/sysroot/");
-        let target_2 = Path::new("/sysroot/oldroot/2025-05-31T16-05-25");
+        let target_2 = Path::new("/sysroot/oldroot/0000000000000001");
         let path_2 = Path::new("/sysroot/var/lib/nixos");
-        let target_path_2 = Path::new("/sysroot/oldroot/2025-05-31T16-05-25/var/lib/nixos");
+        let target_path_2 = Path::new("/sysroot/oldroot/0000000000000001/var/lib/nixos");
 
         assert_eq!(
             root_path_to_target_path(root_2, target_2, path_2),
@@ -349,9 +361,9 @@ mod tests {
                 Path::new("/"),
                 Path::new("/sysroot"),
                 Path::new("/sysroot/oldroot"),
-                Path::new("/sysroot/oldroot/2025-05-31T16-05-25"),
-                Path::new("/sysroot/oldroot/2025-05-31T16-05-25/var"),
-                Path::new("/sysroot/oldroot/2025-05-31T16-05-25/var/lib"),
+                Path::new("/sysroot/oldroot/0000000000000001"),
+                Path::new("/sysroot/oldroot/0000000000000001/var"),
+                Path::new("/sysroot/oldroot/0000000000000001/var/lib"),
             ],
         );
 
@@ -409,12 +421,46 @@ mod tests {
     }
 
     #[test]
-    fn test_eyd() {
-        use tempdir::TempDir;
-
+    fn test_find_target_path_number() {
         let tmpdir = TempDir::new("eyd-test").unwrap();
         let root = tmpdir.path();
         let target = Path::new("/oldroot");
+        let target_path = root.join(target.strip_prefix("/").unwrap_or(&target));
+
+        let target_path_1 = target_path.join(format!("{:016}", 1));
+        let target_path_2 = target_path.join(format!("{:016}", 2));
+        let target_path_3 = target_path.join(format!("{:016}", 3));
+
+        assert_eq!(target_path_1.exists(), false);
+        assert_eq!(find_target_path_number(&target_path), 1);
+
+        fs::DirBuilder::new()
+            .recursive(true)
+            .create(&target_path_1)
+            .unwrap();
+        assert_eq!(target_path_1.exists(), true);
+        assert_eq!(target_path_2.exists(), false);
+        assert_eq!(find_target_path_number(&target_path), 2);
+
+        fs::DirBuilder::new()
+            .recursive(true)
+            .create(&target_path_2)
+            .unwrap();
+        assert_eq!(target_path_2.exists(), true);
+
+        cleanup_old(&root, &target, 1);
+        assert_eq!(target_path_1.exists(), false);
+        assert_eq!(target_path_2.exists(), true);
+        assert_eq!(target_path_3.exists(), false);
+        assert_eq!(find_target_path_number(&target_path), 3);
+    }
+
+    #[test]
+    fn test_eyd() {
+        let tmpdir = TempDir::new("eyd-test").unwrap();
+        let root = tmpdir.path();
+        let target = Path::new("/oldroot");
+        let target_path = root.join(target.strip_prefix("/").unwrap_or(&target));
         let mountpoints = vec![root.into(), root.join("run"), root.join("home")];
         let keep = normalize_keep(
             root,
@@ -435,11 +481,10 @@ mod tests {
         fs::File::create(root.join("etc/ssh/config")).unwrap();
         fs::File::create(root.join("etc/ssh/ssh_host_ed25519_key")).unwrap();
 
-        let target_1 = target.join("2025-05-31T16-00-00");
-        let target_path_1 = root.join(target_1.strip_prefix("/").unwrap_or(&target_1));
+        let target_path_1 = target_path.join("0000000000000001");
         assert_eq!(target_path_1.exists(), false);
 
-        move_dirty(root, &target_1, &keep);
+        move_dirty(root, &target, &keep);
 
         cleanup_old(root, target, 2);
 
@@ -501,11 +546,10 @@ mod tests {
         fs::File::create(root.join("var/lib/cert")).unwrap();
         fs::File::create(root.join("var/log/somelog")).unwrap();
 
-        let target_2 = target.join("2025-05-31T16-01-00");
-        let target_path_2 = root.join(target_2.strip_prefix("/").unwrap_or(&target_2));
+        let target_path_2 = target_path.join("0000000000000002");
         assert_eq!(target_path_2.exists(), false);
 
-        move_dirty(root, &target_2, &keep);
+        move_dirty(root, &target, &keep);
 
         cleanup_old(root, target, 2);
 
@@ -521,12 +565,7 @@ mod tests {
         assert_eq!(root.join("var/log").exists(), true);
         assert_eq!(target_path_2.join("var/log").exists(), false);
 
-        assert_eq!(
-            fs::read_dir(root.join(target.strip_prefix("/").unwrap_or(&target)))
-                .unwrap()
-                .count(),
-            2,
-        );
+        assert_eq!(fs::read_dir(&target_path).unwrap().count(), 2);
 
         fs::DirBuilder::new()
             .recursive(true)
@@ -539,11 +578,10 @@ mod tests {
         fs::File::create(root.join("var/lib/cert")).unwrap();
         fs::File::create(root.join("var/log/somelog")).unwrap();
 
-        let target_3 = target.join("2025-05-31T16-02-00");
-        let target_path_3 = root.join(target_3.strip_prefix("/").unwrap_or(&target_3));
+        let target_path_3 = target_path.join("0000000000000003");
         assert_eq!(target_path_3.exists(), false);
 
-        move_dirty(root, &target_3, &keep);
+        move_dirty(root, &target, &keep);
 
         cleanup_old(root, target, 2);
 
@@ -551,11 +589,6 @@ mod tests {
         assert_eq!(target_path_2.exists(), true);
         assert_eq!(target_path_3.exists(), true);
 
-        assert_eq!(
-            fs::read_dir(root.join(target.strip_prefix("/").unwrap_or(&target)))
-                .unwrap()
-                .count(),
-            2,
-        );
+        assert_eq!(fs::read_dir(&target_path).unwrap().count(), 2);
     }
 }

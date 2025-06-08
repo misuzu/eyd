@@ -1,10 +1,9 @@
 [package]
 name = "eyd"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
-chrono = "0.4"
 serde_json = "1.0"
 mountpoints = "0.2"
 
