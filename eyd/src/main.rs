@@ -114,22 +114,22 @@ fn create_target_parents(root: &Path, target: &Path, path: &Path) {
     }
 }
 
-fn find_target_path_number(target_path: &Path) -> usize {
-    let number = if let Ok(entries) = fs::read_dir(target_path) {
-        let paths = entries
-            .flatten()
-            .map(|entry| entry.path())
-            .collect::<BTreeSet<_>>();
+fn path_file_name_to_number(path: &Path) -> Option<usize> {
+    path.file_name()
+        .and_then(|x| x.to_str().and_then(|x| x.parse::<usize>().ok()))
+}
 
-        paths
-            .last()
-            .and_then(|x| x.file_name())
-            .and_then(|x| x.to_str())
-            .and_then(|x| x.parse::<usize>().ok())
-            .unwrap_or(0)
-    } else {
-        0
-    };
+fn find_target_path_number(target_path: &Path) -> usize {
+    let number = fs::read_dir(target_path)
+        .ok()
+        .and_then(|entries| {
+            entries
+                .flatten()
+                .map(|entry| entry.path())
+                .filter_map(|x| path_file_name_to_number(&x))
+                .max()
+        })
+        .unwrap_or(0);
     number + 1
 }
 
@@ -158,12 +158,13 @@ fn cleanup_old(root: &Path, target: &Path, retain: usize) {
     if retain > 0 {
         let target_path = root.join(target.strip_prefix("/").unwrap_or(target));
         if let Ok(entries) = fs::read_dir(target_path) {
-            let paths = entries
+            let mut paths = entries
                 .flatten()
                 .map(|entry| entry.path())
                 .filter(|path| path.is_dir())
-                .collect::<BTreeSet<_>>();
+                .collect::<Vec<_>>();
             if paths.len() > retain {
+                paths.sort_by_cached_key(|x| path_file_name_to_number(&x).unwrap_or(0));
                 for path in paths.iter().take(paths.len() - retain) {
                     println!("removing {}", path.display());
                     fs::remove_dir_all(path).unwrap();
@@ -384,49 +385,13 @@ mod tests {
     }
 
     #[test]
-    fn test_move_dirty() {
-        let root_1 = Path::new("/");
-        let target_1 = Path::new("/oldroot");
-
-        let root_2 = Path::new("/sysroot/");
-        let target_2 = Path::new("/sysroot/oldroot");
-
-        assert_eq!(
-            root_1.join(target_1.strip_prefix("/").unwrap_or(target_1)),
-            Path::new("/oldroot")
-        );
-
-        assert_eq!(
-            Path::new("/sysroot").join(target_1.strip_prefix("/").unwrap_or(target_1)),
-            Path::new("/sysroot/oldroot")
-        );
-
-        assert_eq!(
-            target_1.join(
-                Path::new("/home")
-                    .strip_prefix(root_1)
-                    .unwrap_or(Path::new("/home"))
-            ),
-            Path::new("/oldroot/home")
-        );
-
-        assert_eq!(
-            target_2.join(
-                Path::new("/sysroot/home")
-                    .strip_prefix(root_2)
-                    .unwrap_or(Path::new("/sysroot/home"))
-            ),
-            Path::new("/sysroot/oldroot/home")
-        );
-    }
-
-    #[test]
     fn test_find_target_path_number() {
         let tmpdir = TempDir::new("eyd-test").unwrap();
         let root = tmpdir.path();
         let target = Path::new("/oldroot");
         let target_path = root.join(target.strip_prefix("/").unwrap_or(&target));
 
+        let target_path_unrelated = target_path.join("random_123");
         let target_path_1 = target_path.join(format!("{:016}", 1));
         let target_path_2 = target_path.join(format!("{:016}", 2));
         let target_path_3 = target_path.join(format!("{:016}", 3));
@@ -440,6 +405,14 @@ mod tests {
             .unwrap();
         assert_eq!(target_path_1.exists(), true);
         assert_eq!(target_path_2.exists(), false);
+        assert_eq!(find_target_path_number(&target_path), 2);
+
+        fs::DirBuilder::new()
+            .recursive(true)
+            .create(&target_path_unrelated)
+            .unwrap();
+
+        assert_eq!(target_path_unrelated.exists(), true);
         assert_eq!(find_target_path_number(&target_path), 2);
 
         fs::DirBuilder::new()
@@ -528,12 +501,7 @@ mod tests {
             false
         );
 
-        assert_eq!(
-            fs::read_dir(root.join(target.strip_prefix("/").unwrap_or(&target)))
-                .unwrap()
-                .count(),
-            1,
-        );
+        assert_eq!(fs::read_dir(&target_path).unwrap().count(), 1);
 
         fs::DirBuilder::new()
             .recursive(true)
@@ -586,6 +554,23 @@ mod tests {
         cleanup_old(root, target, 2);
 
         assert_eq!(target_path_1.exists(), false);
+        assert_eq!(target_path_2.exists(), true);
+        assert_eq!(target_path_3.exists(), true);
+
+        assert_eq!(fs::read_dir(&target_path).unwrap().count(), 2);
+
+        let target_path_unrelated = target_path.join("random_123");
+        fs::DirBuilder::new()
+            .recursive(true)
+            .create(&target_path_unrelated)
+            .unwrap();
+
+        assert_eq!(target_path_unrelated.exists(), true);
+        assert_eq!(fs::read_dir(&target_path).unwrap().count(), 3);
+
+        cleanup_old(root, target, 2);
+
+        assert_eq!(target_path_unrelated.exists(), false);
         assert_eq!(target_path_2.exists(), true);
         assert_eq!(target_path_3.exists(), true);
 
