@@ -21,7 +21,7 @@ I'm not responsible for any data loss, use at your own risk.
 
 ```nix
 # in your flake
-inputs.eyd.url = "github:misuzu/eyd";
+inputs.eyd.url = "github:misuzu/eyd/v0.2.0";
 
 # import the eyd module
 imports = [ inputs.eyd.nixosModules.default ];
