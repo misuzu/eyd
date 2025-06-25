@@ -164,7 +164,7 @@ fn cleanup_old(root: &Path, target: &Path, retain: usize) {
                 .filter(|path| path.is_dir())
                 .collect::<Vec<_>>();
             if paths.len() > retain {
-                paths.sort_by_cached_key(|x| path_file_name_to_number(&x).unwrap_or(0));
+                paths.sort_by_cached_key(|x| path_file_name_to_number(x).unwrap_or(0));
                 for path in paths.iter().take(paths.len() - retain) {
                     println!("removing {}", path.display());
                     fs::remove_dir_all(path).unwrap();
@@ -245,8 +245,8 @@ mod tests {
     fn test_normalize_keep() {
         assert_eq!(
             normalize_keep(
-                &Path::new("/"),
-                &Path::new("/oldroot"),
+                Path::new("/"),
+                Path::new("/oldroot"),
                 vec!["/".into(), "/run".into()],
                 BTreeSet::from([Path::new("/var/log").into(), Path::new("/var").into()])
             ),
@@ -259,8 +259,8 @@ mod tests {
 
         assert_eq!(
             normalize_keep(
-                &Path::new("/sysroot"),
-                &Path::new("/oldroot"),
+                Path::new("/sysroot"),
+                Path::new("/oldroot"),
                 vec![
                     "/".into(),
                     "/run".into(),
@@ -389,22 +389,22 @@ mod tests {
         let tmpdir = tempdir().unwrap();
         let root = tmpdir.path();
         let target = Path::new("/oldroot");
-        let target_path = root.join(target.strip_prefix("/").unwrap_or(&target));
+        let target_path = root.join(target.strip_prefix("/").unwrap_or(target));
 
         let target_path_unrelated = target_path.join("random_123");
         let target_path_1 = target_path.join(format!("{:016}", 1));
         let target_path_2 = target_path.join(format!("{:016}", 2));
         let target_path_3 = target_path.join(format!("{:016}", 3));
 
-        assert_eq!(target_path_1.exists(), false);
+        assert!(!target_path_1.exists());
         assert_eq!(find_target_path_number(&target_path), 1);
 
         fs::DirBuilder::new()
             .recursive(true)
             .create(&target_path_1)
             .unwrap();
-        assert_eq!(target_path_1.exists(), true);
-        assert_eq!(target_path_2.exists(), false);
+        assert!(target_path_1.exists());
+        assert!(!target_path_2.exists());
         assert_eq!(find_target_path_number(&target_path), 2);
 
         fs::DirBuilder::new()
@@ -412,19 +412,19 @@ mod tests {
             .create(&target_path_unrelated)
             .unwrap();
 
-        assert_eq!(target_path_unrelated.exists(), true);
+        assert!(target_path_unrelated.exists());
         assert_eq!(find_target_path_number(&target_path), 2);
 
         fs::DirBuilder::new()
             .recursive(true)
             .create(&target_path_2)
             .unwrap();
-        assert_eq!(target_path_2.exists(), true);
+        assert!(target_path_2.exists());
 
-        cleanup_old(&root, &target, 1);
-        assert_eq!(target_path_1.exists(), false);
-        assert_eq!(target_path_2.exists(), true);
-        assert_eq!(target_path_3.exists(), false);
+        cleanup_old(root, target, 1);
+        assert!(!target_path_1.exists());
+        assert!(target_path_2.exists());
+        assert!(!target_path_3.exists());
         assert_eq!(find_target_path_number(&target_path), 3);
     }
 
@@ -433,7 +433,7 @@ mod tests {
         let tmpdir = tempdir().unwrap();
         let root = tmpdir.path();
         let target = Path::new("/oldroot");
-        let target_path = root.join(target.strip_prefix("/").unwrap_or(&target));
+        let target_path = root.join(target.strip_prefix("/").unwrap_or(target));
         let mountpoints = vec![root.into(), root.join("run"), root.join("home")];
         let keep = normalize_keep(
             root,
@@ -455,15 +455,15 @@ mod tests {
         fs::File::create(root.join("etc/ssh/ssh_host_ed25519_key")).unwrap();
 
         let target_path_1 = target_path.join("0000000000000001");
-        assert_eq!(target_path_1.exists(), false);
+        assert!(!target_path_1.exists());
 
-        move_dirty(root, &target, &keep);
+        move_dirty(root, target, &keep);
 
         cleanup_old(root, target, 2);
 
-        assert_eq!(target_path_1.exists(), true);
-        assert_eq!(root.join("etc/ssh").exists(), true);
-        assert_eq!(target_path_1.join("etc/ssh").exists(), true);
+        assert!(target_path_1.exists());
+        assert!(root.join("etc/ssh").exists());
+        assert!(target_path_1.join("etc/ssh").exists());
 
         assert_eq!(
             target_path_1
@@ -492,13 +492,12 @@ mod tests {
             0o40700
         );
 
-        assert_eq!(root.join("etc/ssh/config").exists(), false);
-        assert_eq!(target_path_1.join("etc/ssh/config").exists(), true);
+        assert!(!root.join("etc/ssh/config").exists());
+        assert!(target_path_1.join("etc/ssh/config").exists());
 
-        assert_eq!(root.join("etc/ssh/ssh_host_ed25519_key").exists(), true);
-        assert_eq!(
-            target_path_1.join("etc/ssh/ssh_host_ed25519_key").exists(),
-            false
+        assert!(root.join("etc/ssh/ssh_host_ed25519_key").exists());
+        assert!(
+            !target_path_1.join("etc/ssh/ssh_host_ed25519_key").exists()
         );
 
         assert_eq!(fs::read_dir(&target_path).unwrap().count(), 1);
@@ -515,23 +514,23 @@ mod tests {
         fs::File::create(root.join("var/log/somelog")).unwrap();
 
         let target_path_2 = target_path.join("0000000000000002");
-        assert_eq!(target_path_2.exists(), false);
+        assert!(!target_path_2.exists());
 
-        move_dirty(root, &target, &keep);
+        move_dirty(root, target, &keep);
 
         cleanup_old(root, target, 2);
 
-        assert_eq!(target_path_1.exists(), true);
-        assert_eq!(target_path_2.exists(), true);
+        assert!(target_path_1.exists());
+        assert!(target_path_2.exists());
 
-        assert_eq!(root.join("var").exists(), true);
-        assert_eq!(target_path_2.join("var").exists(), true);
+        assert!(root.join("var").exists());
+        assert!(target_path_2.join("var").exists());
 
-        assert_eq!(root.join("var/lib").exists(), false);
-        assert_eq!(target_path_2.join("var/lib").exists(), true);
+        assert!(!root.join("var/lib").exists());
+        assert!(target_path_2.join("var/lib").exists());
 
-        assert_eq!(root.join("var/log").exists(), true);
-        assert_eq!(target_path_2.join("var/log").exists(), false);
+        assert!(root.join("var/log").exists());
+        assert!(!target_path_2.join("var/log").exists());
 
         assert_eq!(fs::read_dir(&target_path).unwrap().count(), 2);
 
@@ -547,15 +546,15 @@ mod tests {
         fs::File::create(root.join("var/log/somelog")).unwrap();
 
         let target_path_3 = target_path.join("0000000000000003");
-        assert_eq!(target_path_3.exists(), false);
+        assert!(!target_path_3.exists());
 
-        move_dirty(root, &target, &keep);
+        move_dirty(root, target, &keep);
 
         cleanup_old(root, target, 2);
 
-        assert_eq!(target_path_1.exists(), false);
-        assert_eq!(target_path_2.exists(), true);
-        assert_eq!(target_path_3.exists(), true);
+        assert!(!target_path_1.exists());
+        assert!(target_path_2.exists());
+        assert!(target_path_3.exists());
 
         assert_eq!(fs::read_dir(&target_path).unwrap().count(), 2);
 
@@ -565,14 +564,14 @@ mod tests {
             .create(&target_path_unrelated)
             .unwrap();
 
-        assert_eq!(target_path_unrelated.exists(), true);
+        assert!(target_path_unrelated.exists());
         assert_eq!(fs::read_dir(&target_path).unwrap().count(), 3);
 
         cleanup_old(root, target, 2);
 
-        assert_eq!(target_path_unrelated.exists(), false);
-        assert_eq!(target_path_2.exists(), true);
-        assert_eq!(target_path_3.exists(), true);
+        assert!(!target_path_unrelated.exists());
+        assert!(target_path_2.exists());
+        assert!(target_path_3.exists());
 
         assert_eq!(fs::read_dir(&target_path).unwrap().count(), 2);
     }
