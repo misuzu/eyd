@@ -202,7 +202,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use tempdir::TempDir;
+    use tempfile::tempdir;
 
     use super::*;
 
@@ -386,7 +386,7 @@ mod tests {
 
     #[test]
     fn test_find_target_path_number() {
-        let tmpdir = TempDir::new("eyd-test").unwrap();
+        let tmpdir = tempdir().unwrap();
         let root = tmpdir.path();
         let target = Path::new("/oldroot");
         let target_path = root.join(target.strip_prefix("/").unwrap_or(&target));
@@ -430,7 +430,7 @@ mod tests {
 
     #[test]
     fn test_eyd() {
-        let tmpdir = TempDir::new("eyd-test").unwrap();
+        let tmpdir = tempdir().unwrap();
         let root = tmpdir.path();
         let target = Path::new("/oldroot");
         let target_path = root.join(target.strip_prefix("/").unwrap_or(&target));
