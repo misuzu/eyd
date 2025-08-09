@@ -65,12 +65,11 @@ in
       description = "Erase your darlings";
       serviceConfig = {
         ExecStart = "${lib.getExe eyd} ${
-          lib.escapeShellArgs [
+          lib.escapeShellArgs ([
             "/sysroot"
             "/oldroot"
             (toString cfg.retain)
-            (builtins.toJSON (cfg.defaultKeep ++ cfg.keep))
-          ]
+          ] ++ cfg.defaultKeep ++ cfg.keep)
         }";
         RemainAfterExit = true;
         TimeoutSec = "infinity";

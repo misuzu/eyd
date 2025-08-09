@@ -179,25 +179,24 @@ fn cleanup_old(root: &Path, target: &Path, retain: usize) {
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() < 5 {
-        eprintln!("Usage: {} <root> <target> <retain> <keep_json>", args[0]);
-        return;
+    if let [root, target, retain] = args.iter().skip(1).take(3).collect::<Vec<_>>()[..] {
+        let root = Path::new(&root);
+        let target = Path::new(&target);
+        let retain = retain.parse::<usize>().unwrap();
+
+        let keep = normalize_keep(
+            root,
+            target,
+            mountpaths().unwrap(),
+            args.iter().skip(4).map(|x| Path::new(x).into()).collect(),
+        );
+
+        move_dirty(root, target, &keep);
+
+        cleanup_old(root, target, retain);
+    } else {
+        eprintln!("Usage: {} <root> <target> <retain> [keep] ...", args[0]);
     }
-
-    let root = Path::new(&args[1]);
-    let target = Path::new(&args[2]);
-    let retain = args[3].parse::<usize>().unwrap();
-
-    let keep = normalize_keep(
-        root,
-        target,
-        mountpaths().unwrap(),
-        serde_json::from_str(&args[4]).unwrap(),
-    );
-
-    move_dirty(root, target, &keep);
-
-    cleanup_old(root, target, retain);
 }
 
 #[cfg(test)]
@@ -496,9 +495,7 @@ mod tests {
         assert!(target_path_1.join("etc/ssh/config").exists());
 
         assert!(root.join("etc/ssh/ssh_host_ed25519_key").exists());
-        assert!(
-            !target_path_1.join("etc/ssh/ssh_host_ed25519_key").exists()
-        );
+        assert!(!target_path_1.join("etc/ssh/ssh_host_ed25519_key").exists());
 
         assert_eq!(fs::read_dir(&target_path).unwrap().count(), 1);
 
