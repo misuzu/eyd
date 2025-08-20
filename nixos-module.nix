@@ -72,6 +72,7 @@ in
           ] ++ cfg.defaultKeep ++ cfg.keep)
         }";
         RemainAfterExit = true;
+        Restart = "no";
         TimeoutSec = "infinity";
         Type = "oneshot";
       };

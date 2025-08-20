@@ -167,7 +167,13 @@ fn cleanup_old(root: &Path, target: &Path, retain: usize) {
                 paths.sort_by_cached_key(|x| path_file_name_to_number(x).unwrap_or(0));
                 for path in paths.iter().take(paths.len() - retain) {
                     println!("removing {}", path.display());
-                    fs::remove_dir_all(path).unwrap();
+                    if let Err(err) = fs::remove_dir_all(path) {
+                        println!(
+                            "error while removing {}, please remove manually: {:?}",
+                            path.display(),
+                            err
+                        );
+                    }
                 }
                 return;
             }
