@@ -1,27 +1,27 @@
-# Erase your darlings, but without filesystems tricks
+# Erase your darlings[^1], but without filesystems tricks
 
 ## WARNING
 
-I'm not responsible for any data loss, use at your own risk.
+I am not responsible for any data loss. Use at your own risk.
 
 ## Features
 
-- Easy to set up, just enable it and set paths to keep
-- No snapshots, tmpfs as root or bind mounts are required, works with any filesystem
-- Moves everything from root filesystem not in `boot.initrd.eyd.keep` to the `/oldroot` directory
-- Retains data from previous boots (5 by default), so you have a chance to recover your data
+- Easy to set up: just enable it and specify the paths to keep
+- No snapshots, tmpfs as root, or bind mounts are required - works with any filesystem
+- Moves everything from the root filesystem not listed in `boot.initrd.eyd.keep` to the `/oldroot` directory
+- Retains data from previous boots (5 by default), giving you a chance to recover your data
 
 ## Drawbacks
 
-- Doesn't touch anything besides the root filesystem
-- A ~700KB binary in initrd
-- Only systemd initrd is supported
+- Only affects the root filesystem
+- Adds a ~600 KB binary to the initrd
+- Supports only systemd initrd
 
-## Set it up
+## Setup
 
 ```nix
 # in your flake
-inputs.eyd.url = "github:misuzu/eyd/v0.2.1";
+inputs.eyd.url = "github:misuzu/eyd/v0.3.0";
 
 # import the eyd module
 imports = [ inputs.eyd.nixosModules.default ];
@@ -36,22 +36,16 @@ boot.initrd.eyd.keep = [
   "/etc/ssh/ssh_host_rsa_key"
   "/etc/ssh/ssh_host_rsa_key.pub"
   "/home"
-  "/media"
-  "/mnt"
   "/root"
-  "/var/cache/fwupd"
   "/var/db/dhcpcd"
   "/var/lib/alsa"
   "/var/lib/bluetooth"
   "/var/lib/docker"
-  "/var/lib/fwupd"
-  "/var/lib/iwd"
   "/var/lib/logrotate.status"
   "/var/lib/NetworkManager"
   "/var/lib/private/yggdrasil"
   "/var/lib/systemd"
   "/var/lib/tailscale"
-  "/var/lib/zerotier-one"
   "/var/log/btmp"
   "/var/log/journal"
   "/var/log/lastlog"
@@ -62,10 +56,16 @@ boot.initrd.eyd.retain = 3;
 
 ## Debugging
 
-Run `journalctl -b 0 -u eyd` to see the logs
+Run `journalctl -b 0 -u eyd` to view logs
 
 
 ## Related projects
 
 - [`impermanence`](https://github.com/nix-community/impermanence)
 - [`preservation`](https://github.com/nix-community/preservation)
+
+## License
+
+This project is released under the MIT License. See [LICENSE](./LICENSE).
+
+[^1]: https://grahamc.com/blog/erase-your-darlings/
