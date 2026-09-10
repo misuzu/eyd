@@ -1,10 +1,13 @@
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+use std::io;
+use std::os::unix::fs::lchown;
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use mountpoints::mountpaths;
+use reflink_copy::reflink_or_copy;
 
 #[derive(Debug, PartialEq)]
 enum WalkAction {
@@ -133,6 +136,57 @@ fn find_target_path_number(target_path: &Path) -> usize {
     number + 1
 }
 
+fn move_by_copy_delete(
+    source: &Path,
+    destination: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let is_symlink = source.is_symlink();
+    let metadata = if is_symlink {
+        fs::symlink_metadata(source)?
+    } else {
+        fs::metadata(source)?
+    };
+    let mode = metadata.permissions().mode();
+    let uid = metadata.uid();
+    let gid = metadata.gid();
+
+    if is_symlink {
+        let target = fs::read_link(source)?;
+        std::os::unix::fs::symlink(&target, destination)?;
+        fs::remove_file(source)?;
+    } else if source.is_file() {
+        reflink_or_copy(source, destination)?;
+        fs::remove_file(source)?;
+    } else if source.is_dir() {
+        fs::create_dir_all(destination)?;
+        for entry in fs::read_dir(source)?.flatten() {
+            let entry = entry.path();
+            move_by_copy_delete(&entry, &destination.join(entry.strip_prefix(source)?))?;
+        }
+        fs::remove_dir(source)?;
+    } else {
+        return Ok(());
+    }
+
+    if !is_symlink {
+        // On Linux, symlink permissions cannot be modified and are ignored by the kernel
+        std::fs::set_permissions(destination, fs::Permissions::from_mode(mode))?;
+    }
+    lchown(destination, Some(uid), Some(gid))?;
+
+    Ok(())
+}
+
+fn move_cross_device(source: &Path, destination: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    match fs::rename(source, destination) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::CrossesDevices => {
+            move_by_copy_delete(source, destination)
+        }
+        Err(e) => Err(Box::new(e)),
+    }
+}
+
 fn move_dirty(root: &Path, target: &Path, keep: &BTreeSet<PathBuf>) {
     let target_path = root.join(target.strip_prefix("/").unwrap_or(target));
     let target_path = target_path.join(format!("{:016}", find_target_path_number(&target_path)));
@@ -141,7 +195,7 @@ fn move_dirty(root: &Path, target: &Path, keep: &BTreeSet<PathBuf>) {
         create_target_parents(root, &target_path, &path);
 
         let to = root_path_to_target_path(root, &target_path, &path);
-        if let Err(e) = fs::rename(&path, &to) {
+        if let Err(e) = move_cross_device(&path, &to) {
             println!(
                 "moving {} -> {} error! {:?}",
                 path.display(),
