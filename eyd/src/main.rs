@@ -1,6 +1,9 @@
+use fs_more::directory;
+use fs_more::file;
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
+use std::io;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
@@ -133,6 +136,29 @@ fn find_target_path_number(target_path: &Path) -> usize {
     number + 1
 }
 
+fn move_cross_device(source: &Path, destination: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    match fs::rename(source, destination) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::CrossesDevices => {
+            if source.is_symlink() {
+                let target = fs::read_link(source)?;
+                std::os::unix::fs::symlink(&target, destination)?;
+                fs::remove_file(source)?;
+            } else if source.is_dir() {
+                directory::move_directory(
+                    source,
+                    destination,
+                    directory::DirectoryMoveOptions::default(),
+                )?;
+            } else {
+                file::move_file(source, destination, file::FileMoveOptions::default())?;
+            }
+            Ok(())
+        }
+        Err(e) => Err(Box::new(e)),
+    }
+}
+
 fn move_dirty(root: &Path, target: &Path, keep: &BTreeSet<PathBuf>) {
     let target_path = root.join(target.strip_prefix("/").unwrap_or(target));
     let target_path = target_path.join(format!("{:016}", find_target_path_number(&target_path)));
@@ -141,7 +167,7 @@ fn move_dirty(root: &Path, target: &Path, keep: &BTreeSet<PathBuf>) {
         create_target_parents(root, &target_path, &path);
 
         let to = root_path_to_target_path(root, &target_path, &path);
-        if let Err(e) = fs::rename(&path, &to) {
+        if let Err(e) = move_cross_device(&path, &to) {
             println!(
                 "moving {} -> {} error! {:?}",
                 path.display(),
