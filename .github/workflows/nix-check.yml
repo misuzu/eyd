@@ -7,14 +7,34 @@ on:
     branches: [ main ]
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
+  tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-26.04]
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Tailscale
+      uses: tailscale/github-action@v4
+      with:
+        oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+        oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+        tags: tag:gh-actions
 
-      - name: Install Nix & Setup Cache
-        uses: DeterminateSystems/nix-installer-action@v14
+    - name: Checkout repository
+      uses: actions/checkout@v6
 
-      - name: Run Nix Flake Check
-        run: nix flake check -L
+    - name: Install nix
+      uses: cachix/install-nix-action@v31
+      with:
+        github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Setup Attic cache
+      uses: ryanccn/attic-action@v0
+      with:
+        inputs-from: nixpkgs
+        endpoint: ${{ secrets.ATTIC_ENDPOINT }}
+        cache: ${{ secrets.ATTIC_CACHE }}
+        token: ${{ secrets.ATTIC_TOKEN }}
+
+    - name: Run Nix Flake Check
+      run: nix flake check -L
