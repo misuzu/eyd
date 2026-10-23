@@ -58,18 +58,21 @@ in
     ];
     boot.initrd.systemd.storePaths = [ eyd ];
     boot.initrd.systemd.services.eyd = {
-      after = [ "sysroot.mount" ];
-      before = [ "initrd-fs.target" ];
-      requiredBy = [ "initrd-fs.target" ];
+      after = [ "initrd-fs.target" ];
+      before = [ "initrd.target" ];
       wantedBy = [ "initrd.target" ];
       description = "Erase your darlings";
       serviceConfig = {
         ExecStart = "${lib.getExe eyd} ${
-          lib.escapeShellArgs ([
-            "/sysroot"
-            "/oldroot"
-            (toString cfg.retain)
-          ] ++ cfg.defaultKeep ++ cfg.keep)
+          lib.escapeShellArgs (
+            [
+              "/sysroot"
+              "/oldroot"
+              (toString cfg.retain)
+            ]
+            ++ cfg.defaultKeep
+            ++ cfg.keep
+          )
         }";
         RemainAfterExit = true;
         Restart = "no";

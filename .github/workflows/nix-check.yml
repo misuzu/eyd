@@ -1,0 +1,20 @@
+name: "nix flake check"
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix & Setup Cache
+        uses: DeterminateSystems/nix-installer-action@v14
+
+      - name: Run Nix Flake Check
+        run: nix flake check -L
