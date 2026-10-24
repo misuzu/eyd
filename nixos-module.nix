@@ -50,12 +50,6 @@ in
     };
   };
   config = lib.mkIf cfg.enable {
-    assertions = [
-      {
-        assertion = config.boot.initrd.systemd.enable;
-        message = "`boot.initrd.systemd.enable = true;` is required.";
-      }
-    ];
     boot.initrd.systemd.storePaths = [ eyd ];
     boot.initrd.systemd.services.eyd = {
       after = [ "initrd-fs.target" ];

@@ -5,8 +5,6 @@
     simple = {
       imports = [ ./nixos-module.nix ];
 
-      boot.initrd.systemd.enable = true;
-
       boot.initrd.eyd.enable = true;
       boot.initrd.eyd.keep = [
         "/etc/ssh/ssh_host_ed25519_key"
