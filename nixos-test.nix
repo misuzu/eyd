@@ -18,6 +18,14 @@
       boot.supportedFilesystems = [ "ext4" ];
 
       services.sshd.enable = true;
+
+      virtualisation.emptyDiskImages = [ 128 ];
+      virtualisation.fileSystems."/oldroot" = {
+        autoFormat = true;
+        neededForBoot = true;
+        device = "/dev/vdb";
+        fsType = "ext4";
+      };
     };
   };
 
