@@ -14,19 +14,25 @@
             value = f system;
           }) systems
         );
+      forAllSystemsPkgs =
+        f:
+        forAllSystems (
+          system:
+          let
+            sources = import ./npins;
+            nixpkgs = import sources.nixpkgs { inherit system; };
+            inherit (nixpkgs) pkgs;
+          in
+          f pkgs
+        );
     in
     {
       nixosModules.default = ./nixos-module.nix;
-      checks = forAllSystems (
-        system:
-        let
-          sources = import ./npins;
-          nixpkgs = import sources.nixpkgs { inherit system; };
-          inherit (nixpkgs) pkgs;
-        in
-        {
-          eyd = pkgs.testers.runNixOSTest ./nixos-test.nix;
-        }
-      );
+      checks = forAllSystemsPkgs (pkgs: {
+        eyd = pkgs.testers.runNixOSTest ./nixos-test.nix;
+      });
+      packages = forAllSystemsPkgs (pkgs: {
+        eyd = pkgs.callPackage ./eyd/package.nix { };
+      });
     };
 }
