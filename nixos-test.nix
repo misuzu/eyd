@@ -5,18 +5,17 @@
     simple = {
       imports = [ ./nixos-module.nix ];
 
-      boot.initrd.eyd.enable = true;
-      boot.initrd.eyd.keep = [
-        "/etc/ssh/ssh_host_ed25519_key"
-        "/etc/ssh/ssh_host_ed25519_key.pub"
-        "/etc/ssh/ssh_host_rsa_key"
-        "/etc/ssh/ssh_host_rsa_key.pub"
-        "/home"
-        "/root"
-      ];
-
-      boot.supportedFilesystems = [ "ext4" ];
-
+      boot.initrd.eyd = {
+        enable = true;
+        keep = [
+          "/etc/ssh/ssh_host_ed25519_key"
+          "/etc/ssh/ssh_host_ed25519_key.pub"
+          "/etc/ssh/ssh_host_rsa_key"
+          "/etc/ssh/ssh_host_rsa_key.pub"
+          "/home"
+          "/root"
+        ];
+      };
       services.sshd.enable = true;
     };
   };
