@@ -3,9 +3,11 @@
     inputs:
     let
       systems = [
+        "aarch64-darwin"
         "aarch64-linux"
         "x86_64-linux"
       ];
+      sources = import ./npins;
       forAllSystems =
         f:
         builtins.listToAttrs (
@@ -14,25 +16,47 @@
             value = f system;
           }) systems
         );
-      forAllSystemsPkgs =
-        f:
-        forAllSystems (
-          system:
-          let
-            sources = import ./npins;
-            nixpkgs = import sources.nixpkgs { inherit system; };
-            inherit (nixpkgs) pkgs;
-          in
-          f pkgs
-        );
+      pkgsFor =
+        system:
+        import sources.nixpkgs {
+          inherit system;
+          overlays = [ inputs.self.overlays.default ];
+        };
     in
     {
-      nixosModules.default = ./nixos-module.nix;
-      checks = forAllSystemsPkgs (pkgs: {
-        eyd = pkgs.testers.runNixOSTest ./nixos-test.nix;
+      overlays.default = final: prev: {
+        eyd = final.callPackage ./package.nix { };
+      };
+      devShells = forAllSystems (
+        system:
+        let
+          pkgs = pkgsFor system;
+        in
+        {
+          default = pkgs.mkShell {
+            inputsFrom = [ pkgs.eyd ];
+            packages = [ pkgs.npins ];
+          };
+        }
+      );
+      packages = forAllSystems (system: {
+        default = (pkgsFor system).eyd;
       });
-      packages = forAllSystemsPkgs (pkgs: {
-        eyd = pkgs.callPackage ./eyd/package.nix { };
-      });
+      nixosModules = {
+        eyd = ./nixos-module.nix;
+        default = {
+          imports = [ inputs.self.nixosModules.eyd ];
+          nixpkgs.overlays = [ inputs.self.overlays.default ];
+        };
+      };
+      checks = forAllSystems (
+        system:
+        let
+          pkgs = pkgsFor system;
+        in
+        pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          nixos-module = pkgs.testers.runNixOSTest ./nixos-test.nix;
+        }
+      );
     };
 }

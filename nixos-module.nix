@@ -5,12 +5,12 @@
   ...
 }:
 let
-  eyd = pkgs.callPackage ./eyd/package.nix { };
   cfg = config.boot.initrd.eyd;
 in
 {
   options.boot.initrd.eyd = {
     enable = lib.mkEnableOption "eyd";
+    package = lib.mkPackageOption pkgs "eyd" { };
     keep = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       example = [
@@ -50,14 +50,14 @@ in
     };
   };
   config = lib.mkIf cfg.enable {
-    boot.initrd.systemd.storePaths = [ eyd ];
+    boot.initrd.systemd.storePaths = [ cfg.package ];
     boot.initrd.systemd.services.eyd = {
       after = [ "initrd-fs.target" ];
       before = [ "initrd.target" ];
       wantedBy = [ "initrd.target" ];
       description = "Erase your darlings";
       serviceConfig = {
-        ExecStart = "${lib.getExe eyd} ${
+        ExecStart = "${lib.getExe cfg.package} ${
           lib.escapeShellArgs (
             [
               "/sysroot"
@@ -75,5 +75,7 @@ in
       };
       unitConfig.DefaultDependencies = "no";
     };
+    # make sure we don't garbage collect this package
+    system.extraDependencies = [ cfg.package ];
   };
 }
