@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 mountpoints = "0.2"
+reflink-copy = "0.1.32"
 
 [dev-dependencies]
 tempfile = "3.27.0"
